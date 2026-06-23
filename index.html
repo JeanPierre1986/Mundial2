@@ -69,10 +69,10 @@
   .eyebrow .dot{width:7px;height:7px;border-radius:50%;background:var(--gold);box-shadow:0 0 0 4px rgba(244,196,78,.16)}
   .title{
     font-family:'Anton',sans-serif;font-weight:400;
-    font-size:clamp(32px,10vw,50px);line-height:.92;
-    letter-spacing:.01em;margin:12px 0 2px;text-transform:uppercase;
+    font-size:clamp(32px,10vw,50px);line-height:.9;
+    letter-spacing:.01em;margin:6px 0 0;text-transform:uppercase;
   }
-  .title .sub-mundial{display:block;font-size:.42em;letter-spacing:.06em;color:var(--muted);-webkit-text-stroke:0}
+  .title .sub-mundial{display:block;font-size:.42em;letter-spacing:.06em;line-height:1.15;margin-bottom:2px;color:var(--muted);-webkit-text-stroke:0}
   .lede{color:var(--muted);font-size:14.5px;max-width:38ch;margin-top:10px}
   .lede b{color:var(--chalk)}
 
@@ -195,15 +195,24 @@
   }
   .teamchip .tflag{font-size:24px}
 
-  /* bandera de Inglaterra dibujada (la emoji no renderiza en muchos teléfonos) */
-  .eng-flag{
-    display:inline-block;width:1.18em;height:.82em;border-radius:2px;vertical-align:-.07em;
-    background:
+  /* banderas dibujadas en CSS (los emojis de bandera no se ven en Windows/desktop) */
+  .fl{
+    display:inline-block;width:1.42em;height:.96em;border-radius:2px;vertical-align:-.13em;
+    box-shadow:0 0 0 1px rgba(0,0,0,.30);position:relative;overflow:hidden;flex:0 0 auto;
+  }
+  /* Argentina: celeste / blanco / celeste + sol */
+  .fl-ar{background:linear-gradient(#74acdf 0 33.34%,#fff 33.34% 66.67%,#74acdf 66.67% 100%);}
+  .fl-ar::after{content:"";position:absolute;top:50%;left:50%;width:.3em;height:.3em;border-radius:50%;
+    background:#f6b40e;box-shadow:0 0 0 .035em #e08a00;transform:translate(-50%,-50%);}
+  /* Francia: azul / blanco / rojo vertical */
+  .fl-fr{background:linear-gradient(90deg,#1b3a8f 0 33.34%,#fff 33.34% 66.67%,#e23b3b 66.67% 100%);}
+  /* España: rojo / amarillo (doble) / rojo */
+  .fl-es{background:linear-gradient(#c60b1e 0 25%,#ffc400 25% 75%,#c60b1e 75% 100%);}
+  /* Inglaterra: cruz de San Jorge */
+  .fl-eng{background:
       linear-gradient(#E8473B,#E8473B) center/.2em 100% no-repeat,
       linear-gradient(#E8473B,#E8473B) center/100% .2em no-repeat,
-      #f6f6f3;
-    box-shadow:0 0 0 1px rgba(0,0,0,.28);
-  }
+      #f6f6f3;}
   .teamchip .tinfo{flex:1}
   .teamchip .tinfo b{font-size:14.5px;display:flex;align-items:center;gap:8px}
   .teamchip .tinfo small{color:var(--muted);font-size:11.5px}
@@ -348,13 +357,13 @@
   var DEFAULT = {
     updated: "22 jun 2026",
     teams: {
-      ARG:{name:"Argentina",flag:"🇦🇷",color:"#71B7E8",stage:0,pts:6,alive:true,status:"lead",
+      ARG:{name:"Argentina",flag:'<span class="fl fl-ar" role="img" aria-label="Argentina"></span>',color:"#71B7E8",stage:0,pts:6,alive:true,status:"lead",
            note:"Ganó 2-0 a Austria (doblete de Messi) · clasificada a 16avos"},
-      FRA:{name:"Francia",flag:"🇫🇷",color:"#5475E0",stage:0,pts:3,alive:true,status:"lead",
+      FRA:{name:"Francia",flag:'<span class="fl fl-fr" role="img" aria-label="Francia"></span>',color:"#5475E0",stage:0,pts:3,alive:true,status:"lead",
            note:"Ganó 3-1 a Senegal (doblete de Mbappé) · hoy vs Irak"},
-      ESP:{name:"España",flag:"🇪🇸",color:"#E8473B",stage:0,pts:4,alive:true,status:"up",
+      ESP:{name:"España",flag:'<span class="fl fl-es" role="img" aria-label="España"></span>',color:"#E8473B",stage:0,pts:4,alive:true,status:"up",
            note:"4-0 a Arabia Saudí tras 0-0 con Cabo Verde · vs Uruguay"},
-      ENG:{name:"Inglaterra",flag:'<span class="eng-flag" role="img" aria-label="Inglaterra"></span>',color:"#F25C57",stage:0,pts:3,alive:true,status:"lead",
+      ENG:{name:"Inglaterra",flag:'<span class="fl fl-eng" role="img" aria-label="Inglaterra"></span>',color:"#F25C57",stage:0,pts:3,alive:true,status:"lead",
            note:"Ganó 4-2 a Croacia · 23 jun vs Ghana"}
     },
     players:[
