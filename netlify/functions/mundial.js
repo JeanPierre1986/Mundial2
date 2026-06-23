@@ -1,116 +1,130 @@
 // netlify/functions/mundial.js
-const API = "https://v3.football.api-sports.io";
-const SEASON = 2026;
-const LEAGUE = 1;
+const API = "https://api.football-data.org/v4";
+const TARGET = { ARG: "ARG", FRA: "FRA", ESP: "ESP", ENG: "ENG" };
 
-const TARGET = { ARG: "Argentina", FRA: "France", ESP: "Spain", ENG: "England" };
-const DONE = new Set(["FT", "AET", "PEN"]);
-const LIVE = new Set(["1H", "HT", "2H", "ET", "BT", "P", "LIVE", "INT"]);
+const FINISHED = "FINISHED";
+const LIVE = new Set(["IN_PLAY", "PAUSED"]);
+const UPCOMING = new Set(["TIMED", "SCHEDULED"]);
 
-function roundIndex(round) {
-  const r = (round || "").toLowerCase();
-  if (r.includes("group")) return 0;
-  if (r.includes("round of 32")) return 1;
-  if (r.includes("round of 16")) return 2;
-  if (r.includes("quarter")) return 3;
-  if (r.includes("semi")) return 4;
-  if (r.includes("3rd place") || r.includes("third place")) return 4;
-  if (r.includes("final")) return 5;
+function stageIndex(stage) {
+  const s = (stage || "").toUpperCase();
+  if (s.includes("GROUP")) return 0;
+  if (s.includes("LAST_32") || s.includes("ROUND_OF_32")) return 1;
+  if (s.includes("LAST_16") || s.includes("ROUND_OF_16")) return 2;
+  if (s.includes("QUARTER")) return 3;
+  if (s.includes("SEMI")) return 4;
+  if (s.includes("THIRD")) return 4;
+  if (s.includes("FINAL")) return 5;
   return 0;
 }
 
-async function call(path, key) {
-  const res = await fetch(API + path, { headers: { "x-apisports-key": key } });
-  return res.json();
+function resultFor(m, isHome) {
+  const w = m.score && m.score.winner;
+  if (w === "HOME_TEAM") return isHome ? "W" : "L";
+  if (w === "AWAY_TEAM") return isHome ? "L" : "W";
+  const pen = m.score && m.score.penalties;
+  if (pen && pen.home != null && pen.away != null) {
+    const mine = isHome ? pen.home : pen.away;
+    const opp = isHome ? pen.away : pen.home;
+    if (mine > opp) return "W";
+    if (mine < opp) return "L";
+  }
+  return "D";
 }
 
 exports.handler = async () => {
-  const key = process.env.APISPORTS_KEY;
+  const token = process.env.FOOTBALL_DATA_TOKEN || process.env.APISPORTS_KEY;
   const headers = { "content-type": "application/json", "cache-control": "public, max-age=120" };
-
-  if (!key) {
-    return { statusCode: 200, headers, body: JSON.stringify({ error: "Falta APISPORTS_KEY", teams: {} }) };
+  if (!token) {
+    return { statusCode: 200, headers, body: JSON.stringify({ error: "Falta el token", teams: {} }) };
   }
 
   try {
-    const [standRes, fixRes] = await Promise.all([
-      call(`/standings?league=${LEAGUE}&season=${SEASON}`, key),
-      call(`/fixtures?league=${LEAGUE}&season=${SEASON}`, key),
-    ]);
+    const res = await fetch(`${API}/competitions/WC/matches`, { headers: { "X-Auth-Token": token } });
+    const data = await res.json();
+    const matches = data.matches || [];
 
-    const standings = standRes.response || [];
-    const fixtures = fixRes.response || [];
+    if (!matches.length) {
+      return { statusCode: 200, headers, body: JSON.stringify({ updated: new Date().toISOString(), teams: {}, debug: { status: res.status, message: data.message, errorCode: data.errorCode } }) };
+    }
 
-    const stand = {};
-    const groups = (standings[0] && standings[0].league && standings[0].league.standings) || [];
-    groups.forEach((group) => {
-      group.forEach((row) => {
-        for (const k in TARGET) {
-          if (row.team && row.team.name === TARGET[k]) {
-            stand[k] = { id: row.team.id, points: row.points || 0, rank: row.rank || 9 };
-          }
+    const idByTla = {};
+    const groupByTla = {};
+    matches.forEach((m) => {
+      [m.homeTeam, m.awayTeam].forEach((t) => {
+        if (t && t.tla) {
+          idByTla[t.tla] = t.id;
+          if (m.stage && m.stage.toUpperCase().includes("GROUP") && m.group) groupByTla[t.tla] = m.group;
         }
       });
     });
 
+    const ptsByTla = {};
+    const add = (t, p) => { if (t && t.tla) ptsByTla[t.tla] = (ptsByTla[t.tla] || 0) + p; };
+    matches.forEach((m) => {
+      if (!(m.stage && m.stage.toUpperCase().includes("GROUP")) || m.status !== FINISHED) return;
+      const w = m.score.winner;
+      if (w === "HOME_TEAM") { add(m.homeTeam, 3); add(m.awayTeam, 0); }
+      else if (w === "AWAY_TEAM") { add(m.awayTeam, 3); add(m.homeTeam, 0); }
+      else { add(m.homeTeam, 1); add(m.awayTeam, 1); }
+    });
+
     const teams = {};
     for (const k in TARGET) {
-      const s = stand[k];
-      if (!s) continue;
-      const id = s.id;
-      const mine = fixtures
-        .filter((x) => x.teams.home.id === id || x.teams.away.id === id)
-        .sort((a, b) => a.fixture.timestamp - b.fixture.timestamp);
-      const sideOf = (x) => (x.teams.home.id === id ? "home" : "away");
-      const oppOf = (x) => (x.teams.home.id === id ? x.teams.away : x.teams.home);
-      const wonOf = (x) => x.teams[sideOf(x)].winner === true;
-      const lostOf = (x) => x.teams[sideOf(x)].winner === false;
-      const done = mine.filter((x) => DONE.has(x.fixture.status.short));
-      const koDone = done.filter((x) => roundIndex(x.league.round) > 0);
-      const reached = mine.reduce((m, x) => Math.max(m, roundIndex(x.league.round)), 0);
-      const liveNow = mine.some((x) => LIVE.has(x.fixture.status.short));
+      const tla = TARGET[k];
+      const id = idByTla[tla];
+      if (id == null) continue;
+
+      const mine = matches.filter((m) => (m.homeTeam && m.homeTeam.id === id) || (m.awayTeam && m.awayTeam.id === id)).sort((x, y) => new Date(x.utcDate) - new Date(y.utcDate));
+      const isHome = (m) => m.homeTeam.id === id;
+      const oppName = (m) => (isHome(m) ? m.awayTeam.name || m.awayTeam.tla : m.homeTeam.name || m.homeTeam.tla);
+
+      const done = mine.filter((m) => m.status === FINISHED);
+      const reached = mine.reduce((mx, m) => Math.max(mx, stageIndex(m.stage)), 0);
+      const liveNow = mine.some((m) => LIVE.has(m.status));
+      const groupPts = ptsByTla[tla] || 0;
+
       let stage = 0, alive = true;
-      const finalWon = done.some((x) => roundIndex(x.league.round) === 5 && wonOf(x));
+      const finalWon = done.some((m) => stageIndex(m.stage) === 5 && resultFor(m, isHome(m)) === "W");
       if (finalWon) { stage = 6; alive = true; }
       else {
-        const lostKO = koDone.filter(lostOf).sort((a, b) => a.fixture.timestamp - b.fixture.timestamp);
-        if (lostKO.length) { alive = false; stage = roundIndex(lostKO[lostKO.length - 1].league.round); }
-        else {
-          stage = reached; alive = true;
-          if (stage === 0) {
-            const groupDone = done.filter((x) => roundIndex(x.league.round) === 0).length;
-            const hasKO = mine.some((x) => roundIndex(x.league.round) > 0);
-            if (groupDone >= 3 && !hasKO) alive = false;
-          }
-        }
+        const koLost = done.filter((m) => stageIndex(m.stage) > 0 && resultFor(m, isHome(m)) === "L").sort((x, y) => new Date(x.utcDate) - new Date(y.utcDate));
+        if (koLost.length) { alive = false; stage = stageIndex(koLost[koLost.length - 1].stage); }
+        else { stage = reached; alive = true; }
       }
+
+      let rank = 9;
+      const grp = groupByTla[tla];
+      if (grp) {
+        const inGroup = Object.keys(groupByTla).filter((t) => groupByTla[t] === grp);
+        const sorted = inGroup.map((t) => ({ t, p: ptsByTla[t] || 0 })).sort((a, b) => b.p - a.p);
+        rank = sorted.findIndex((o) => o.t === tla) + 1;
+      }
+
       let status = "none";
       if (alive && stage === 6) status = "win";
       else if (liveNow) status = "live";
-      else if (alive && stage === 0) status = s.rank === 1 ? "lead" : s.rank <= 2 ? "up" : "none";
+      else if (alive && stage === 0) status = rank === 1 ? "lead" : rank <= 2 ? "up" : "none";
+
       const parts = [];
       const last = done[done.length - 1];
       if (last) {
-        const side = sideOf(last);
-        const gf = side === "home" ? last.goals.home : last.goals.away;
-        const ga = side === "home" ? last.goals.away : last.goals.home;
-        const verb = wonOf(last) ? "Ganó" : lostOf(last) ? "Perdió" : "Empató";
-        const prep = wonOf(last) ? "a" : "con";
-        parts.push(`${verb} ${gf}-${ga} ${prep} ${oppOf(last).name}`);
+        const home = isHome(last);
+        const ft = last.score.fullTime || {};
+        const gf = home ? ft.home : ft.away;
+        const ga = home ? ft.away : ft.home;
+        const r = resultFor(last, home);
+        const verb = r === "W" ? "Ganó" : r === "L" ? "Perdió" : "Empató";
+        const prep = r === "W" ? "a" : "con";
+        parts.push(`${verb} ${gf}-${ga} ${prep} ${oppName(last)}`);
       }
-      const next = mine.find((x) => x.fixture.status.short === "NS");
-      if (next) parts.push(`próx. vs ${oppOf(next).name}`);
-      teams[k] = { pts: s.points, stage, alive, status, note: parts.join(" · ") || "—" };
+      const next = mine.find((m) => UPCOMING.has(m.status));
+      if (next) parts.push(`próx. vs ${oppName(next)}`);
+
+      teams[k] = { pts: groupPts, stage, alive, status, note: parts.join(" · ") || "—" };
     }
 
-    const out = { updated: new Date().toISOString(), teams };
-    if (Object.keys(teams).length === 0) {
-      out.debug = {
-        standings: { results: standRes.results, errors: standRes.errors },
-        fixtures: { results: fixRes.results, errors: fixRes.errors },
-      };
-    }
-    return { statusCode: 200, headers, body: JSON.stringify(out) };
+    return { statusCode: 200, headers, body: JSON.stringify({ updated: new Date().toISOString(), teams }) };
   } catch (e) {
     return { statusCode: 200, headers, body: JSON.stringify({ error: String(e), teams: {} }) };
   }
